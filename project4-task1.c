@@ -5,31 +5,31 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
-// Configurações do Servo Motor
+// Servo Motor Configuration
 #define TASK_IDENTIFICADOR_SERVO "ServoTask"
-#define DELAY_UP_SERVO 100
-#define DELAY_ENTRE_SERVO 1000
-#define DELAY_DOWN_SERVO 200
-#define FREQUENCIA_SERVO 50
+#define DELAY_UP_SERVO 100          // Delay for upward movement
+#define DELAY_ENTRE_SERVO 1000      // Delay at the end positions (0° or 180°)
+#define DELAY_DOWN_SERVO 200        // Delay for downward movement
+#define FREQUENCIA_SERVO 50         // Servo signal frequency
 #define REF_POSICIONAMENTO_INICIAL 500
 #define REF_POSICIONAMENTO_FINAL 2500
-#define DIRECAO_POSITIVA 1
-#define DIRECAO_NEGATIVA -1
-#define ANGULO_INICIAL 0
-#define INCREMENTO 2
-#define PIN_SERVO 17
+#define DIRECAO_POSITIVA 1          // Positive direction
+#define DIRECAO_NEGATIVA -1         // Negative direction
+#define ANGULO_INICIAL 0            // Initial angle
+#define INCREMENTO 2                // Incremental step for angle
+#define PIN_SERVO 17                // Pin connected to the servo motor
 
-// Configurações dos Botões e Potenciômetro
-#define PIN_LOOP_BUTTON 19
-#define PIN_MANUAL_BUTTON 18
-#define PIN_SHUTDOWN_BUTTON 13
-#define PIN_POTENTIOMETER 14
-bool isManualMode = false;
-bool loopStarted = false;
-bool modoSelecionado = false;
-bool isPaused = false; // Indica se o sistema está pausado
+// Button and Potentiometer Configuration
+#define PIN_LOOP_BUTTON 19          // Pin for loop mode button
+#define PIN_MANUAL_BUTTON 18        // Pin for manual mode button
+#define PIN_SHUTDOWN_BUTTON 13      // Pin for shutdown button
+#define PIN_POTENTIOMETER 14        // Pin for potentiometer
+bool isManualMode = false;          // Manual mode flag
+bool loopStarted = false;           // Loop mode flag
+bool modoSelecionado = false;       // Mode selected flag
+bool isPaused = false;              // Pause state flag
 
-// Configurações do Display OLED
+// OLED Display Configuration
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 #define OLED_RESET -1
@@ -37,47 +37,59 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 Servo servoMotor;
 
-// Variáveis para debounce
-unsigned long lastDebounceTime = 0;
-const unsigned long debounceDelay = 50; // 50 ms para debounce
+// Previous button states
+bool prevLoopButton = HIGH;
+bool prevManualButton = HIGH;
+bool prevShutdownButton = HIGH;
 
-// Função para atualizar o display e o monitor serial
+// Function to update the display and log to the serial monitor
 void updateDisplayAndSerial(const char *mode, float angulo, float incremento, const char *direcao) {
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
   display.setCursor(0, 0);
-  display.print("Modo: ");
+  display.print("Mode: ");
   display.println(mode);
   display.println("");
-  display.print("Angulo: ");
+  display.print("Angle: ");
   display.print(angulo);
-  display.println(" graus");
+  display.println(" degrees");
   display.println("");
-  display.print("Incremento: ");
+  display.print("Increment: ");
   display.println(incremento);
   display.println("");
-  display.print("Direcao: ");
+  display.print("Direction: ");
   display.println(direcao);
   display.display();
 
-  // Envia os mesmos dados para o monitor serial
+  // Log the same data to the serial monitor
   Serial.println("!-- ServoMotor --!");
-  Serial.print("Modo: ");
+  Serial.print("Mode: ");
   Serial.println(mode);
-  Serial.print("Angulo: ");
+  Serial.print("Angle: ");
   Serial.print(angulo);
-  Serial.println(" graus");
-  Serial.print("Incremento: ");
+  Serial.println(" degrees");
+  Serial.print("Increment: ");
   Serial.println(incremento);
-  Serial.print("Direcao: ");
+  Serial.print("Direction: ");
   Serial.println(direcao);
   Serial.println("------------------");
 }
 
-// Task do Servo Motor
+// Function to detect button state transitions
+bool detectButtonPress(int pin, bool &prevState) {
+  bool currentState = digitalRead(pin);
+  if (currentState != prevState) {
+    prevState = currentState;
+    return true; // Button state changed
+  }
+  prevState = currentState;
+  return false;
+}
+
+// Task to control the servo motor
 void taskServoMotor(void *params) {
-  Serial.println("Iniciando Task do ServoMotor!");
+  Serial.println("Starting Servo Motor Task!");
   servoMotor.setPeriodHertz(FREQUENCIA_SERVO);
   servoMotor.attach(PIN_SERVO, REF_POSICIONAMENTO_INICIAL, REF_POSICIONAMENTO_FINAL);
   int angulo = ANGULO_INICIAL;
@@ -86,56 +98,51 @@ void taskServoMotor(void *params) {
   display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
   display.clearDisplay();
   display.display();
-  updateDisplayAndSerial("Aguardando Modo", angulo, 0, "N/A");
+  updateDisplayAndSerial("Waiting for Mode", angulo, 0, "N/A");
 
   while (true) {
-    unsigned long currentMillis = millis();
-
-    // Verifica o botão de shutdown
-    if (digitalRead(PIN_SHUTDOWN_BUTTON) == LOW && (currentMillis - lastDebounceTime) > debounceDelay) {
-      isPaused = true; // Pausa o sistema
-      loopStarted = false; // Para o movimento automático
-      modoSelecionado = true; // Indica que o modo foi selecionado
-      updateDisplayAndSerial("Sistema Pausado", angulo, 0, "N/A");
-      lastDebounceTime = currentMillis;
+    // Check the shutdown button
+    if (detectButtonPress(PIN_SHUTDOWN_BUTTON, prevShutdownButton)) {
+      isPaused = true;              // Pause the system
+      loopStarted = false;          // Stop automatic movement
+      modoSelecionado = true;       // Mode is selected
+      updateDisplayAndSerial("System Paused", angulo, 0, "N/A");
     }
 
-    // Verifica o botão manual com debounce
-    if (digitalRead(PIN_MANUAL_BUTTON) == LOW && (currentMillis - lastDebounceTime) > debounceDelay) {
+    // Check the manual button
+    if (detectButtonPress(PIN_MANUAL_BUTTON, prevManualButton)) {
       isPaused = false;
       isManualMode = true;
       loopStarted = false;
       modoSelecionado = true;
       updateDisplayAndSerial("Manual", angulo, 0, "N/A");
-      lastDebounceTime = currentMillis;
     }
 
-    // Verifica o botão de loop com debounce
-    if (digitalRead(PIN_LOOP_BUTTON) == LOW && (currentMillis - lastDebounceTime) > debounceDelay) {
+    // Check the loop button
+    if (detectButtonPress(PIN_LOOP_BUTTON, prevLoopButton)) {
       isPaused = false;
       isManualMode = false;
       loopStarted = true;
       modoSelecionado = true;
-      updateDisplayAndSerial("Automatico", angulo, INCREMENTO * direcao, direcao > 0 ? "Positiva" : "Negativa");
-      lastDebounceTime = currentMillis;
+      updateDisplayAndSerial("Automatic", angulo, INCREMENTO * direcao, direcao > 0 ? "Positive" : "Negative");
     }
 
     if (modoSelecionado && !isPaused) {
       if (isManualMode) {
-        // Controle manual pelo potenciômetro
+        // Manual mode: Control the angle via potentiometer
         int potValue = analogRead(PIN_POTENTIOMETER);
         angulo = map(potValue, 0, 4095, 0, 180);
         servoMotor.write(angulo);
         updateDisplayAndSerial("Manual", angulo, 0, "N/A");
         vTaskDelay(100 / portTICK_PERIOD_MS);
       } else if (loopStarted) {
-        // Controle automático
+        // Automatic mode: Move continuously with delays
         angulo += INCREMENTO * direcao;
         servoMotor.write(angulo);
-        updateDisplayAndSerial("Automatico", angulo, INCREMENTO * direcao, direcao > 0 ? "Positiva" : "Negativa");
+        updateDisplayAndSerial("Automatic", angulo, INCREMENTO * direcao, direcao > 0 ? "Positive" : "Negative");
 
         if (angulo >= 180 || angulo <= 0) {
-          direcao *= -1; // Inverte a direção
+          direcao *= -1; // Reverse direction at boundaries
           vTaskDelay(DELAY_ENTRE_SERVO / portTICK_PERIOD_MS);
         } else if (direcao == DIRECAO_POSITIVA) {
           vTaskDelay(DELAY_UP_SERVO / portTICK_PERIOD_MS);
@@ -144,7 +151,7 @@ void taskServoMotor(void *params) {
         }
       }
     } else {
-      // Aguarda até que o sistema seja reativado
+      // Wait until the system is reactivated
       vTaskDelay(100 / portTICK_PERIOD_MS);
     }
   }
@@ -152,22 +159,23 @@ void taskServoMotor(void *params) {
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("Iniciando ESP32");
+  Serial.println("Initializing ESP32");
 
-  // Configuração dos pinos
+  // Pin configuration
   pinMode(PIN_LOOP_BUTTON, INPUT_PULLUP);
   pinMode(PIN_MANUAL_BUTTON, INPUT_PULLUP);
   pinMode(PIN_SHUTDOWN_BUTTON, INPUT_PULLUP);
   pinMode(PIN_POTENTIOMETER, INPUT);
 
-  // Inicializa botões como não pressionados
+  // Initialize system state
   isManualMode = false;
   loopStarted = false;
   modoSelecionado = false;
 
+  // Create the servo task
   xTaskCreatePinnedToCore(taskServoMotor, TASK_IDENTIFICADOR_SERVO, 2048, NULL, 5, NULL, 0);
 }
 
 void loop() {
-  delay(10);
+  delay(10); // Small delay in the main loop
 }
